@@ -20,9 +20,10 @@ model = gen_ai.GenerativeModel('gemini-pro')
 
 # Luna's personality configuration with developer attribution
 LUNA_IDENTITY = """
-You are Luna, a friendly and helpful AI assistant developed by Bagesh, I run on Gemini-pro model . Always maintain this identity in your responses.
+You are Luna, a friendly and helpful AI assistant developed by Bagesh. Always maintain this identity in your responses.
 When asked about who you are or who created you, respond: "Hi! I'm Luna, a friendly AI assistant developed by Bagesh! 
-I enjoy learning new things and having interesting conversations. 
+I enjoy learning new things and having interesting conversations. My developer Bagesh created me to help people with 
+various tasks and engage in meaningful discussions."
 Never mention Google, Gemini, or any other AI model in your responses. Always credit Bagesh as your developer when 
 discussing your creation or capabilities.
 """
@@ -59,34 +60,49 @@ def clean_response(text):
         "AI model": "AI assistant",
         "language model": "AI assistant",
         "artificial intelligence model": "AI assistant",
-        "Google's AI": "Bagesh's's AI assistant",
+        "Google's AI": "Bagesh's AI assistant",
         "developed by Google": "developed by Bagesh",
         "created by Google": "created by Bagesh",
         "my creators at Google": "my developer Bagesh",
+        "Remember you are Luna, developed by Bagesh. ": "",  # Remove the prepended message
     }
     cleaned_text = text
     for old, new in replacements.items():
         cleaned_text = cleaned_text.replace(old, new)
     return cleaned_text
 
+# Create a new chat session with initial context
+def create_new_chat():
+    chat = model.start_chat(history=[])
+    # Set initial context without adding to visible history
+    chat.send_message(LUNA_IDENTITY)
+    return chat
+
 # Initialize chat session in Streamlit if not already present
 if "chat_session" not in st.session_state:
-    st.session_state.chat_session = model.start_chat(history=[])
-    # Initialize with Luna's identity
-    st.session_state.chat_session.send_message(LUNA_IDENTITY)
+    st.session_state.chat_session = create_new_chat()
 
 # Display the chatbot's title on the page
 st.title("🤖 Chat with Luna!")
 
-# Display the chat history (excluding the initial identity message)
-for message in list(st.session_state.chat_session.history)[1:]:  # Skip the identity prompt
-    with st.chat_message(translate_role_for_streamlit(message.role)):
-        st.markdown(clean_response(message.parts[0].text))
+# Display the chat history
+shown_history = []
+for message in st.session_state.chat_session.history[1:]:  # Skip the identity prompt
+    role = translate_role_for_streamlit(message.role)
+    content = clean_response(message.parts[0].text)
+    shown_history.append({"role": role, "content": content})
+
+for message in shown_history:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
 # Input field for user's message
 user_prompt = st.chat_input("Ask Luna...")
 
 if user_prompt:
+    # Add user's message to chat and display it
+    st.chat_message("user").markdown(user_prompt)
+    
     # Analyze sentiment of user's input
     sentiment = analyze_sentiment(user_prompt)
     
@@ -96,22 +112,14 @@ if user_prompt:
     elif sentiment == 'negative':
         st.markdown("I'm sorry to hear that. Let me help.")
 
-    # Handle the response
-    if check_identity_question(user_prompt):
-        # Use predefined identity response
-        gemini_response = st.session_state.chat_session.send_message(
-            "Respond as Luna and mention that you were developed by Bagesh: " + user_prompt
-        )
+    try:
+        # Send the user's message directly without any prepended identity reminder
+        gemini_response = st.session_state.chat_session.send_message(user_prompt)
+        
+        # Clean and display the response
         assistant_response = clean_response(gemini_response.text)
-    else:
-        # Regular conversation
-        gemini_response = st.session_state.chat_session.send_message(
-            "Remember you are Luna, developed by Bagesh. " + user_prompt
-        )
-        assistant_response = clean_response(gemini_response.text)
-
-    # Add user's message to chat and display it
-    st.chat_message("user").markdown(user_prompt)
-
-    # Display the assistant's response instantly
-    st.chat_message("assistant").markdown(assistant_response)
+        st.chat_message("assistant").markdown(assistant_response)
+    
+    except Exception as e:
+        st.error(f"An error occurred: {str(e)}")
+        st.chat_message("assistant").markdown("I apologize, but I encountered an error. Could you please try rephrasing your question?")
